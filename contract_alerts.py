@@ -53,7 +53,7 @@ def load_config():
     sec = json.load(open(sp, encoding="utf-8")) if os.path.exists(sp) else {}
     for key, env in (("ntfy_topic", "NTFY_TOPIC"), ("email_address", "EMAIL_ADDRESS"), ("email_app_password", "EMAIL_APP_PASSWORD")):
         if os.environ.get(env):
-            sec[key] = os.environ[env]
+            sec[key] = os.environ[env].strip().lstrip("﻿")
     cfg["ntfy"]["topic"] = sec.get("ntfy_topic", "")
     cfg["email"]["from"] = cfg["email"]["to"] = sec.get("email_address", "")
     cfg["email"]["app_password"] = sec.get("email_app_password", "")
