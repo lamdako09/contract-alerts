@@ -32,7 +32,7 @@ GOV = re.compile(
     r"General Services Administration|GSA|FAA|FEMA|NIH|CDC|Veterans Affairs|Pentagon|federal government|"
     r"Naval [A-Z][a-z]+ (Systems )?Command|Army Contracting Command|Air Force Research Laboratory|AFRL)\b")
 WON = re.compile(r"\b(awarded|award of|won|wins|received|receives|selected|secured|secures|was granted|has been granted|"
-                 r"definitized|exercised an option)\b", re.I)
+                 r"definitized|exercised an option|entered into)\b", re.I)
 CONTRACT = re.compile(r"\b(contract|task order|delivery order|order|agreement|IDIQ|BPA|OTA|other transaction)\b", re.I)
 SHARED = re.compile(r"\b(multiple[- ]award|multi[- ]award|shared ceiling|one of \w+ (companies|awardees|vendors))\b", re.I)
 AMOUNT = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s*(billion|million|thousand|bn|mm|[MBK])?\b", re.I)
@@ -69,7 +69,8 @@ def parse_amount(m):
 def find_awards(text):
     """Sentences announcing a government contract win, with the largest dollar amount in each."""
     out = []
-    for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z\"“])", text):
+    # sentences, plus headline / bullet breaks (press-release headlines often have no full stop)
+    for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z\"“])|\s+[•▪●]\s+", text):
         if len(sent) > 1200 or not (WON.search(sent) and CONTRACT.search(sent) and GOV.search(sent)):
             continue
         if SHARED.search(sent) or re.search(r"\b(revenue|backlog|bookings|book-to-bill)\b", sent, re.I):
@@ -141,8 +142,9 @@ def parse_feed(raw):
 def filing_docs(cfg, cik, accession):
     base = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}"
     idx = json.loads(sec_get(cfg, f"{base}/index.json"))
-    names = [i["name"] for i in idx["directory"]["item"] if i["name"].lower().endswith((".htm", ".html", ".txt"))
-             and not i["name"].lower().endswith("-index.htm") and "index-headers" not in i["name"].lower()]
+    # the filing's own documents only: not the index pages, XBRL viewer pages (R1.htm) or full-submission .txt copy
+    names = [n for n in (i["name"] for i in idx["directory"]["item"])
+             if n.lower().endswith((".htm", ".html")) and "index" not in n.lower() and not re.fullmatch(r"R\d+\.htm", n)]
     return base, names[:6]
 
 
@@ -150,7 +152,10 @@ def analyze(cfg, filing, cik_info, revenue):
     base, names = filing_docs(cfg, filing["cik"], filing["accession"])
     awards = []
     for n in names:
-        awards += find_awards(to_text(sec_get(cfg, f"{base}/{n}")))
+        text = to_text(sec_get(cfg, f"{base}/{n}"))
+        if re.search(r"\b(INVESTOR|CORPORATE|COMPANY) PRESENTATION\b", text[:400], re.I):
+            continue  # slide decks restate earlier awards; they are not new announcements
+        awards += find_awards(text)
     if not awards:
         return None
     best = max(awards, key=lambda a: a["amount"])
