@@ -1,0 +1,4 @@
+secrets.json
+data/
+*.xlsx
+__pycache__/

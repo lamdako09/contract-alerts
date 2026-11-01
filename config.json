@@ -1,0 +1,15 @@
+{
+  "threshold_pct_of_revenue": 5,
+  "min_award_usd": 1000000,
+  "lookback_days": 7,
+  "ntfy": {
+    "enabled": true,
+    "server": "https://ntfy.sh"
+  },
+  "email": {
+    "enabled": true,
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 465
+  },
+  "sec_user_agent": "contract-alerts research@example.org"
+}

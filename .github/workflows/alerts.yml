@@ -1,0 +1,74 @@
+name: Contract alerts
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # GitHub may start scheduled runs late when busy
+  workflow_dispatch:         # "Run workflow" button for manual tests
+
+permissions:
+  contents: read
+  actions: write             # keep-alive below
+
+concurrency:
+  group: contract-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+      EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - id: week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      # SEC ticker list + revenue: refreshed weekly
+      - uses: actions/cache@v4
+        with:
+          path: |
+            data/tickers.json
+            data/revenue.json
+          key: sec-ref-${{ steps.week.outputs.week }}
+
+      # which filings / contracts were already checked or alerted
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/state.json
+            data/announce_state.json
+          key: state-${{ github.run_id }}
+          restore-keys: state-
+
+      - name: SEC announcements (company 8-K filings)
+        run: python announcement_alerts.py
+
+      - name: USAspending awards (every 6 hours)
+        if: always()
+        run: python contract_alerts.py --every-hours 6
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            data/state.json
+            data/announce_state.json
+          key: state-${{ github.run_id }}
+
+      # GitHub pauses schedules in repos with no activity for 60 days; re-enabling daily prevents that.
+      - name: Keep schedule alive
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date -u +%H)" = "03" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/alerts.yml/enable"
+          fi
