@@ -8,7 +8,7 @@ that amount per year is at least `threshold_pct_of_revenue` of the company's yea
 usage:
   python announcement_alerts.py                      normal run (sends alerts)
   python announcement_alerts.py --dry-run            print findings, send nothing, remember nothing
-  python announcement_alerts.py --check CIK ACCESSION [--send]   analyze one filing (testing)
+  python announcement_alerts.py --check CIK ACCESSION [FILED-DATE] [--send]   analyze one filing (testing)
 """
 import csv, html, json, os, re, sys, time
 from datetime import datetime
@@ -204,7 +204,8 @@ def main():
 
     if "--check" in sys.argv:
         i = sys.argv.index("--check")
-        f = {"cik": int(sys.argv[i + 1]), "accession": sys.argv[i + 2], "company": "?", "updated": "?"}
+        filed = sys.argv[i + 3] if len(sys.argv) > i + 3 and not sys.argv[i + 3].startswith("--") else "?"
+        f = {"cik": int(sys.argv[i + 1]), "accession": sys.argv[i + 2], "company": "?", "updated": filed}
         a = analyze(cfg, f, cik_info, revenue)
         if not a:
             print("no government contract award found")
