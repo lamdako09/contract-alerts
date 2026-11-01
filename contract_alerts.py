@@ -13,6 +13,7 @@ usage:
   python contract_alerts.py --test       send one test notification and exit
   --lookback N / --threshold PCT         override config.json for one run
   --every-hours N                        skip unless the last full run was N+ hours ago (for frequent schedulers)
+  --when-updated                         skip unless USAspending has published new data since the last run
 """
 import csv, io, json, os, re, smtplib, sys, time, urllib.request, zipfile
 from datetime import date, datetime, timedelta
@@ -147,17 +148,24 @@ def lookup(name, by_norm):
 
 # ---------- USAspending ----------
 
-def fetch_new_awards(cfg):
+def usaspending_last_updated():
+    return json.loads(http(f"{API}/awards/last_updated/"))["last_updated"]
+
+
+def fetch_new_awards(cfg, min_award=None, recipient_types=None):
     end = date.today()
     start = end - timedelta(days=cfg["lookback_days"])
+    min_award = min_award or cfg["min_award_usd"]
     body = {
         "filters": {
             "award_type_codes": ["A", "B", "C", "D"],
             "time_period": [{"start_date": start.isoformat(), "end_date": end.isoformat(), "date_type": "new_awards_only"}],
-            "award_amounts": [{"lower_bound": cfg["min_award_usd"]}],
+            "award_amounts": [{"lower_bound": min_award}],
         },
         "file_format": "csv",
     }
+    if recipient_types:
+        body["filters"]["recipient_type_names"] = recipient_types
     job = json.loads(http(f"{API}/download/awards/", data=body))
     for _ in range(120):  # up to 20 minutes
         st = json.loads(http(job["status_url"]))
@@ -172,7 +180,8 @@ def fetch_new_awards(cfg):
     name = next(n for n in z.namelist() if n.startswith("Contracts_PrimeAwardSummaries"))
     csv.field_size_limit(10**8)
     rows = list(csv.DictReader(io.TextIOWrapper(z.open(name), encoding="utf-8-sig", newline="")))
-    log(f"USAspending: {len(rows)} contracts first awarded {start} .. {end} at >= ${cfg['min_award_usd']:,}")
+    who = f", recipients: {', '.join(recipient_types)}" if recipient_types else ""
+    log(f"USAspending: {len(rows)} contracts first awarded {start} .. {end} at >= ${min_award:,.0f}{who}")
     return rows
 
 
@@ -209,14 +218,17 @@ def money(v):
 
 
 def render(a):
-    title = f"{a['ticker']}: {money(a['potential'])} contract = {a['impact']:.1%} of yearly revenue"
+    share = f"{a['impact']:.1%} of yearly revenue" if a["impact"] is not None else "revenue unknown"
+    title = f"{a['ticker']}: {money(a['potential'])} contract = {share}"
+    if a.get("saved_search"):
+        title = "[Your saved search] " + title
     body = (
         f"{a['company']} ({a['exchange']}: {a['ticker']})\n"
         f"Winner as filed: {a['winner']}\n"
         f"Agency: {a['sub_agency'] or a['agency']}\n"
         f"Awarded: {a['awarded']}   Runs until: {a['runs_until'] or '?'}\n"
         f"Potential value: {money(a['potential'])}  (~{money(a['per_year'])}/yr)   Obligated so far: {money(a['obligated'])}\n"
-        f"Company yearly revenue: {money(a['revenue'])}\n"
+        f"Company yearly revenue: {money(a['revenue']) if a['revenue'] else 'unknown'}\n"
         f"What it's for: {(a['description'] or '')[:300]}\n"
         f"Stock: https://finance.yahoo.com/quote/{a['ticker']}\n"
         f"Contract: {a['link']}\n\n"
@@ -283,13 +295,31 @@ def main():
         if datetime.now() - datetime.fromisoformat(state["last_run"]) < timedelta(hours=hours):
             print(f"last run {state['last_run']} is under {hours:g}h ago; skipping")
             return
+    published = None
+    if "--when-updated" in sys.argv:
+        published = usaspending_last_updated()
+        recent = state.get("last_run") and datetime.now() - datetime.fromisoformat(state["last_run"]) < timedelta(hours=24)
+        if published == state.get("usaspending_last_updated") and recent:
+            print(f"USAspending data unchanged since {published}; skipping")
+            return
     for flag, key, cast in (("--lookback", "lookback_days", int), ("--threshold", "threshold_pct_of_revenue", float)):
         if flag in sys.argv:
             cfg[key] = cast(sys.argv[sys.argv.index(flag) + 1])
 
     if "--test" in sys.argv:
-        notify(cfg, "Contract alerts: test", "If you can read this, contract alerts will reach you here.")
-        log("test notification sent")
+        where = "GitHub (cloud)" if os.environ.get("GITHUB_ACTIONS") else "this PC"
+        sample = {  # a real October award, shown in the exact alert format
+            "ticker": "BAER", "company": "Bridger Aerospace Group Holdings, Inc.", "exchange": "Nasdaq",
+            "winner": "BRIDGER AEROSPACE GROUP, LLC", "agency": "Department of the Interior",
+            "sub_agency": "Departmental Offices", "awarded": "2026-10-13", "runs_until": "2027-10-12",
+            "potential": 5_340_000, "per_year": 5_340_000, "obligated": 5_340_000, "revenue": 122_800_000,
+            "impact": 0.0435, "description": "TASK ORDER FOR 2027 AIR ATTACK FLIGHT SERVICES WITH CAMERA SYSTEMS",
+            "link": "https://www.usaspending.gov/search?hash=ccf9627b340ee34882aff1af876f3a95",
+        }
+        title, body = render(sample)
+        notify(cfg, f"TEST from {where} - {title}", "This is a test. A real alert looks like this:\n\n" + body,
+               sample["link"], sample["ticker"])
+        log(f"test notification sent from {where}")
         return
 
     refresh_sec(cfg, state)
@@ -299,6 +329,16 @@ def main():
     seen = set(state.get("seen", []))
     hits = sorted((a for a in scored if a["impact"] is not None and a["impact"] >= threshold and a["key"] not in seen),
                   key=lambda a: -a["impact"])
+    # Your saved USAspending search: every match won by a listed company alerts, whatever its size vs revenue.
+    ss = cfg.get("saved_search")
+    if ss:
+        rows = fetch_new_awards(cfg, ss["min_award_usd"], ss.get("recipient_types"))
+        matches = score(rows, by_norm, by_ticker, revenue)
+        log(f"saved search: {len(rows)} matches, {len(matches)} won by listed companies")
+        hit_keys = {a["key"] for a in hits}
+        for a in matches:
+            if a["key"] not in seen and a["key"] not in hit_keys:
+                hits.append({**a, "saved_search": True})
     log(f"{len(scored)} awards to listed companies; {len(hits)} new at >= {threshold:.0%} of revenue")
 
     for a in sorted(scored, key=lambda a: -(a["impact"] or 0))[:10]:
@@ -317,6 +357,8 @@ def main():
         append_alerts(hits)
     state["seen"] = sorted(seen | {a["key"] for a in hits})
     state["last_run"] = datetime.now().isoformat(timespec="seconds")
+    if published:
+        state["usaspending_last_updated"] = published
     with open(STATE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=1)
 

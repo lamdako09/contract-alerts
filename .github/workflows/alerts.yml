@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"   # GitHub may start scheduled runs late when busy
   workflow_dispatch:         # "Run workflow" button for manual tests
+    inputs:
+      test:
+        description: "Only send a test notification"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,12 +53,17 @@ jobs:
           key: state-${{ github.run_id }}
           restore-keys: state-
 
+      - name: Test notification
+        if: inputs.test
+        run: python contract_alerts.py --test
+
       - name: SEC announcements (company 8-K filings)
+        if: ${{ !inputs.test }}
         run: python announcement_alerts.py
 
-      - name: USAspending awards (every 6 hours)
-        if: always()
-        run: python contract_alerts.py --every-hours 6
+      - name: USAspending awards + saved search (as soon as new data is published)
+        if: ${{ always() && !inputs.test }}
+        run: python contract_alerts.py --when-updated
 
       - uses: actions/cache/save@v4
         if: always()

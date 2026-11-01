@@ -2,6 +2,11 @@
   "threshold_pct_of_revenue": 5,
   "min_award_usd": 1000000,
   "lookback_days": 7,
+  "saved_search": {
+    "usaspending_link": "https://www.usaspending.gov/search?hash=ccf9627b340ee34882aff1af876f3a95",
+    "min_award_usd": 20000000,
+    "recipient_types": ["small_business"]
+  },
   "ntfy": {
     "enabled": true,
     "server": "https://ntfy.sh"
