@@ -20,7 +20,10 @@ Each contract / filing alerts once, when it is at or above `threshold_pct_of_rev
 ## Where it runs
 
 **GitHub Actions** (`.github/workflows/alerts.yml`): every 5 minutes (GitHub may start runs late when busy).
-The USAspending check runs only once every 6 hours. Secrets go in the repository's
+Each run asks USAspending whether it has published new data (it does so about once a day) and evaluates it as
+soon as it has. Each new batch is also run through the saved search in `config.json` (`saved_search`, from your
+USAspending link); every match won by a listed company alerts, whatever its size. To send a test alert:
+*Actions → Contract alerts → Run workflow → tick "Only send a test notification"*. Secrets go in the repository's
 *Settings → Secrets and variables → Actions*:
 
 | Secret | Value |
