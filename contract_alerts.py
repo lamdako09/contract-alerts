@@ -98,9 +98,9 @@ def num(s):
 # ---------- SEC reference data (tickers + yearly revenue), refreshed weekly ----------
 
 def refresh_sec(cfg, state):
-    last = state.get("sec_refreshed")
     paths = [os.path.join(DATA, "tickers.json"), os.path.join(DATA, "revenue.json")]
-    if last and date.fromisoformat(last) > date.today() - timedelta(days=7) and all(map(os.path.exists, paths)):
+    week_ago = time.time() - 7 * 86400
+    if all(os.path.exists(p) and os.path.getmtime(p) > week_ago for p in paths):
         return
     ua = {"User-Agent": cfg["sec_user_agent"]}
     tickers = http("https://www.sec.gov/files/company_tickers_exchange.json", headers=ua)
@@ -122,7 +122,6 @@ def refresh_sec(cfg, state):
             time.sleep(0.3)
     with open(paths[1], "w", encoding="utf-8") as f:
         json.dump(revenue, f)
-    state["sec_refreshed"] = date.today().isoformat()
     log(f"SEC data refreshed: {len(revenue)} companies with revenue")
 
 

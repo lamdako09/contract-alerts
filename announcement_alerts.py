@@ -214,12 +214,13 @@ def main():
     seen = set(state.get("seen", []))
     new = [f for f in parse_feed(sec_get(cfg, FEED))
            if f["accession"] not in seen and f["cik"] in cik_info and any(i in WANTED_ITEMS for i in f["items"])]
-    found = 0
+    found, failed = 0, set()
     for f in new:
         try:
             a = analyze(cfg, f, cik_info, revenue)
         except Exception as e:
-            ca.log(f"[8-K] {f['accession']} skipped: {e}")
+            ca.log(f"[8-K] {f['accession']} will retry next run: {e}")
+            failed.add(f["accession"])
             continue
         seen.add(f["accession"])
         if not a:
@@ -237,8 +238,8 @@ def main():
                 csv.writer(fh).writerow([datetime.now().isoformat(timespec="seconds"), a["ticker"], title, a["link"]])
             ca.log(f"ALERT {title}")
     if not dry:
-        # remember every filing from the feed, relevant or not, so it is never re-read
-        state["seen"] = sorted(seen | {f["accession"] for f in new})[-5000:]
+        # remember every checked filing so it is never re-read; failed ones are retried next run
+        state["seen"] = sorted(seen | {f["accession"] for f in new} - failed)[-5000:]
         state["last_run"] = datetime.now().isoformat(timespec="seconds")
         with open(STATE, "w", encoding="utf-8") as fh:
             json.dump(state, fh)
