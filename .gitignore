@@ -2,3 +2,4 @@ secrets.json
 data/
 *.xlsx
 __pycache__/
+oracle_ssh_public_key.txt

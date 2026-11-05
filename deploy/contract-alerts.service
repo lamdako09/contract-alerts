@@ -1,0 +1,14 @@
+[Unit]
+Description=Contract alerts (SEC 8-K announcements + USAspending awards)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/contract-alerts
+ExecStart=/bin/bash /home/ubuntu/contract-alerts/deploy/run_loop.sh
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
